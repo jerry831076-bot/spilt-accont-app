@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import App from './App.jsx'; // *** 將這一行改為 .jsx ***
+import App from './app.js'; 
 
 ReactDOM.render(
   <React.StrictMode>
