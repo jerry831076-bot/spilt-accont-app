@@ -752,101 +752,102 @@ function SettlementView({ activity, setActivities, expenses, users }) {
       if (Math.abs(debtor.amount) < 1) i++;
       if (creditor.amount < 1) j++;
     }
+
     return result;
   }, [balances]);
 
+  // Helper to get user name
+  const getUserName = (id) => users.find(u => u.id === id)?.name || '未知使用者';
+
+  // Function to toggle settlement status
   const toggleSettlement = (userId) => {
-    const storedActivities = JSON.parse(localStorage.getItem('split-bill-activities') || '[]');
-    const freshActivity = storedActivities.find(a => a.id === activity.id);
+    const newSettlementStatus = { ...activity.settlementStatus, [userId]: !activity.settlementStatus[userId] };
     
-    if(!freshActivity) return;
+    const isFullySettled = Object.values(newSettlementStatus).every(status => status === true);
 
-    const currentStatus = freshActivity.settlementStatus || {};
-    const newStatus = !currentStatus[userId];
-    
-    const updatedStatusMap = {
-      ...currentStatus,
-      [userId]: newStatus
-    };
-
-    const allSettled = activity.participants.every(pid => updatedStatusMap[pid] === true);
-
-    const updatedActivity = {
-      ...freshActivity,
-      settlementStatus: updatedStatusMap,
-      isFullySettled: allSettled
-    };
-
-    const newActivityList = storedActivities.map(a => a.id === activity.id ? updatedActivity : a);
-    setActivities(newActivityList);
-    localStorage.setItem('split-bill-activities', JSON.stringify(newActivityList));
+    setActivities(prev => prev.map(a => 
+      a.id === activity.id ? { 
+        ...a, 
+        settlementStatus: newSettlementStatus, 
+        isFullySettled: isFullySettled 
+      } : a
+    ));
   };
-
-  const settledCount = Object.values(activity.settlementStatus || {}).filter(Boolean).length;
-  const totalCount = activity.participants.length;
   
+  // Check if the activity is already fully settled
+  const isFullySettled = activity.isFullySettled;
+
   return (
-    <div className="space-y-6 pb-20">
-      <div className="bg-blue-600 text-white p-5 rounded-xl shadow-lg">
-        <h3 className="font-bold mb-4 flex items-center gap-2">
-          <Calculator size={20} /> 最佳轉帳建議
-        </h3>
-        {transfers.length === 0 ? (
-          <div className="text-blue-100 text-sm">目前沒有需要轉帳的款項。</div>
-        ) : (
-          <div className="space-y-3">
-            {transfers.map((t, idx) => {
-               const fromUser = users.find(u => u.id === t.from);
-               const toUser = users.find(u => u.id === t.to);
-               return (
-                 <div key={idx} className="bg-white/10 p-3 rounded-lg flex items-center justify-between backdrop-blur-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{fromUser?.name}</span>
-                      <ArrowRight size={16} className="opacity-70" />
-                      <span className="font-medium">{toUser?.name}</span>
-                    </div>
-                    <div className="font-bold text-lg">${Math.round(t.amount)}</div>
-                 </div>
-               );
-            })}
-          </div>
-        )}
+    <div className="space-y-6">
+      <h2 className="text-xl font-bold">成員結餘一覽</h2>
+      
+      <div className={`p-4 rounded-xl border-2 ${isFullySettled ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}>
+        <p className="font-medium flex items-center gap-2">
+          {isFullySettled ? <Check size={20} /> : <AlertTriangle size={20} />}
+          {isFullySettled ? '活動狀態：已結清' : '活動狀態：尚有未結清款項'}
+        </p>
       </div>
 
-      <div>
-        <h3 className="font-bold text-gray-800 mb-3 px-1">結清確認表</h3>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="grid grid-cols-1 divide-y divide-gray-100">
-            {activity.participants.map(userId => {
-              const user = users.find(u => u.id === userId);
-              const net = balances[userId] || 0;
-              const isSettled = activity.settlementStatus?.[userId];
-              const isBirthday = birthdayIds.includes(userId);
-              const isOutsider = user?.isOutsider;
-
-              return (
-                <div key={userId} className={`p-4 flex items-center justify-between transition ${isSettled ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
-                  <div className="flex items-center gap-3">
-                     <button onClick={() => toggleSettlement(userId)} className={`w-6 h-6 rounded border flex items-center justify-center transition ${isSettled ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 hover:border-blue-400'}`}>{isSettled && <Check size={16} />}</button>
-                     <div>
-                       <div className={`font-medium flex items-center gap-1 ${isSettled && 'line-through decoration-gray-400 text-gray-500'}`}>
-                         {user?.name}
-                         {isBirthday && <span className="text-xs no-underline">🎂</span>}
-                         {isOutsider && <span className="text-[10px] bg-orange-100 text-orange-600 px-1 rounded no-underline">外賓</span>}
-                       </div>
-                       <div className="text-xs text-gray-400">{net > 0 ? '應收' : net < 0 ? '應付' : '無收付'}</div>
-                     </div>
-                  </div>
-                  <div className={`font-bold text-lg ${net > 0 ? 'text-green-600' : net < 0 ? 'text-red-500' : 'text-gray-400'} ${isSettled && 'line-through decoration-gray-400 text-gray-400'}`}>
-                    {net > 0 ? `+$${Math.round(net)}` : net < 0 ? `-$${Math.round(Math.abs(net))}` : '-'}
-                  </div>
+      <div className="space-y-2">
+        {Object.entries(balances)
+          .filter(([id]) => activity.participants.includes(id)) // Only show participants
+          .map(([id, amount]) => {
+            const name = getUserName(id);
+            const val = Math.round(amount * 100) / 100;
+            const status = val > 0 ? '應收' : (val < 0 ? '應付' : '結清');
+            const color = val > 0 ? 'text-green-600' : (val < 0 ? 'text-red-600' : 'text-gray-500');
+            const absVal = Math.abs(val);
+            
+            return (
+              <div key={id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className={`w-3 h-3 rounded-full ${val > 0 ? 'bg-green-500' : (val < 0 ? 'bg-red-500' : 'bg-gray-300')}`}></div>
+                  <div className="font-medium text-lg">{name}</div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+                <div className="text-right">
+                  <div className={`${color} font-bold text-xl`}>
+                    {status !== '結清' ? `${status} $${absVal.toLocaleString()}` : '已結清'}
+                  </div>
+                  {absVal > 1 && (
+                    <button 
+                      onClick={() => toggleSettlement(id)}
+                      className={`mt-1 text-xs px-2 py-0.5 rounded-full transition ${activity.settlementStatus[id] ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}
+                    >
+                      {activity.settlementStatus[id] ? '✅ 標記已處理' : '標記已處理'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
       </div>
-      <div className="fixed bottom-20 left-0 w-full px-4 pointer-events-none"><div className="bg-gray-900/90 text-white backdrop-blur p-3 rounded-lg shadow-lg flex justify-between items-center max-w-md mx-auto pointer-events-auto"><div className="text-sm font-medium">結案進度: {settledCount} / {totalCount} 人</div>{activity.isFullySettled && <div className="flex items-center gap-1 text-green-400 font-bold text-sm"><Check size={16} /> 全員結清</div>}</div></div>
+
+      <h2 className="text-xl font-bold mt-8">建議結清路徑 ({transfers.length} 筆)</h2>
+
+      {transfers.length === 0 ? (
+        <div className="p-4 bg-green-50 text-green-700 rounded-xl flex items-center gap-2">
+          <Check size={20} /> 目前帳務已平衡，無需轉帳。
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {transfers.map((t, index) => (
+            <div key={index} className="bg-white p-4 rounded-xl shadow-md border border-gray-100 flex items-center justify-between">
+              <div className="text-sm text-gray-500">
+                {getUserName(t.from)}
+              </div>
+              <div className="flex items-center gap-3 font-bold text-lg text-blue-600">
+                <ArrowRight size={24} />
+              </div>
+              <div className="text-right text-sm text-gray-500">
+                {getUserName(t.to)}
+              </div>
+              <div className="text-right font-bold text-xl text-green-600">
+                ${Math.round(t.amount).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
