@@ -763,7 +763,16 @@ function SettlementView({ activity, setActivities, expenses, users }) {
   const toggleSettlement = (userId) => {
     const newSettlementStatus = { ...activity.settlementStatus, [userId]: !activity.settlementStatus[userId] };
     
-    const isFullySettled = Object.values(newSettlementStatus).every(status => status === true);
+    // 修正 Bug: 檢查是否「全部完成」時，要忽略金額為 0 的人
+    // 邏輯：如果 (金額是 0) 或者 (已經標記為 true)，就算該人員已完成
+    const isFullySettled = Object.entries(balances).every(([pid, amount]) => {
+        // 如果這個人不在參與名單，跳過
+        if (!activity.participants.includes(pid)) return true;
+        // 如果金額小於 1 (接近 0)，視為已完成
+        if (Math.abs(amount) < 1) return true;
+        // 否則，必須要是「已標記 (true)」才算完成
+        return newSettlementStatus[pid] === true;
+    });
 
     setActivities(prev => prev.map(a => 
       a.id === activity.id ? { 
@@ -774,7 +783,6 @@ function SettlementView({ activity, setActivities, expenses, users }) {
     ));
   };
   
-  // Check if the activity is already fully settled
   const isFullySettled = activity.isFullySettled;
 
   return (
@@ -784,7 +792,7 @@ function SettlementView({ activity, setActivities, expenses, users }) {
       <div className={`p-4 rounded-xl border-2 ${isFullySettled ? 'bg-green-50 border-green-300 text-green-700' : 'bg-red-50 border-red-300 text-red-700'}`}>
         <p className="font-medium flex items-center gap-2">
           {isFullySettled ? <Check size={20} /> : <AlertTriangle size={20} />}
-          {isFullySettled ? '活動狀態：已結清' : '活動狀態：尚有未結清款項'}
+          {isFullySettled ? '活動狀態：已全數結清' : '活動狀態：尚有未結清款項'}
         </p>
       </div>
 
@@ -794,26 +802,54 @@ function SettlementView({ activity, setActivities, expenses, users }) {
           .map(([id, amount]) => {
             const name = getUserName(id);
             const val = Math.round(amount * 100) / 100;
-            const status = val > 0 ? '應收' : (val < 0 ? '應付' : '結清');
-            const color = val > 0 ? 'text-green-600' : (val < 0 ? 'text-red-600' : 'text-gray-500');
             const absVal = Math.abs(val);
             
+            // 修正 Bug: 優先檢查「是否已人工標記」，如果是，就強制顯示結清
+            const isManuallySettled = activity.settlementStatus[id];
+            
+            // 狀態判斷：金額為0 或者 已人工標記 -> 視為結清
+            const isSettled = absVal < 1 || isManuallySettled;
+
+            // 顯示文字與顏色
+            let statusText = '結清';
+            let colorClass = 'text-gray-400';
+            let bgClass = 'bg-gray-50'; // 結清的人背景變灰
+
+            if (!isSettled) {
+                if (val > 0) {
+                    statusText = '應收';
+                    colorClass = 'text-green-600';
+                    bgClass = 'bg-white';
+                } else {
+                    statusText = '應付';
+                    colorClass = 'text-red-600';
+                    bgClass = 'bg-white';
+                }
+            } else {
+                // 如果是人工按掉的，顯示灰色，但保留金額給你看
+                statusText = '已結清';
+                colorClass = 'text-gray-400 line-through'; // 加上刪除線效果
+                bgClass = 'bg-gray-50';
+            }
+            
             return (
-              <div key={id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center">
+              <div key={id} className={`${bgClass} p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center transition-colors`}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-3 h-3 rounded-full ${val > 0 ? 'bg-green-500' : (val < 0 ? 'bg-red-500' : 'bg-gray-300')}`}></div>
-                  <div className="font-medium text-lg">{name}</div>
+                  <div className={`w-3 h-3 rounded-full ${!isSettled ? (val > 0 ? 'bg-green-500' : 'bg-red-500') : 'bg-gray-300'}`}></div>
+                  <div className={`font-medium text-lg ${isSettled ? 'text-gray-400' : ''}`}>{name}</div>
                 </div>
                 <div className="text-right">
-                  <div className={`${color} font-bold text-xl`}>
-                    {status !== '結清' ? `${status} $${absVal.toLocaleString()}` : '已結清'}
+                  <div className={`${colorClass} font-bold text-xl`}>
+                     {/* 如果是結清，顯示文字；否則顯示 狀態 + 金額 */}
+                     {statusText} {absVal > 0 && `$${absVal.toLocaleString()}`}
                   </div>
+                  {/* 只要金額大於 1，就顯示按鈕讓使用者切換狀態 */}
                   {absVal > 1 && (
                     <button 
                       onClick={() => toggleSettlement(id)}
-                      className={`mt-1 text-xs px-2 py-0.5 rounded-full transition ${activity.settlementStatus[id] ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}
+                      className={`mt-1 text-xs px-2 py-0.5 rounded-full transition ${activity.settlementStatus[id] ? 'bg-gray-200 text-gray-600' : 'bg-blue-100 text-blue-700'}`}
                     >
-                      {activity.settlementStatus[id] ? '✅ 標記已處理' : '標記已處理'}
+                      {activity.settlementStatus[id] ? '復原未結清' : '標記已結清'}
                     </button>
                   )}
                 </div>
