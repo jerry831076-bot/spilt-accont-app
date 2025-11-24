@@ -333,7 +333,6 @@ function ActivitiesView({ activities, setActivities, users, onSelectActivity, se
       date: new Date().toLocaleDateString(),
       participants: selectedParticipantIds,
       birthdayPersonIds: selectedBirthdayIds,
-      totalExpense: 0,
       settlementStatus: settlementStatus,
       isFullySettled: false
     };
@@ -376,6 +375,11 @@ function ActivitiesView({ activities, setActivities, users, onSelectActivity, se
       {activities.map(activity => {
         const birthdayIds = activity.birthdayPersonIds || (activity.birthdayPersonId ? [activity.birthdayPersonId] : []);
         const birthdayNames = users.filter(u => birthdayIds.includes(u.id)).map(u => u.name).join(', ');
+        
+        // 修正: 即時計算該活動的總支出，確保列表顯示正確金額
+        const activityExpenses = expenses.filter(e => e.activityId === activity.id);
+        const realTotalExpense = activityExpenses.reduce((sum, e) => sum + e.amount, 0);
+
         return (
           <div key={activity.id} onClick={() => onSelectActivity(activity.id)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 active:scale-95 transition-transform cursor-pointer relative overflow-hidden group">
             <div className="flex justify-between items-start mb-2">
@@ -391,7 +395,8 @@ function ActivitiesView({ activities, setActivities, users, onSelectActivity, se
                 {birthdayNames && <div className="flex items-center gap-1 text-xs bg-pink-50 text-pink-600 px-2 py-1 rounded-lg max-w-[150px] truncate"><Cake size={14} /><span className="font-medium">壽星: {birthdayNames}</span></div>}
                 <div className="text-xs text-gray-400">{activity.participants.length} 人參與</div>
               </div>
-              <div className="text-xl font-bold text-blue-600">${activity.totalExpense.toLocaleString()}</div>
+              {/* 這裡使用即時計算的 realTotalExpense */}
+              <div className="text-xl font-bold text-blue-600">${realTotalExpense.toLocaleString()}</div>
             </div>
           </div>
         );
@@ -527,7 +532,6 @@ function ExpensesView({ activity, expenses, setExpenses, allExpenses, users }) {
     }
     
     setExpenses(updatedExpenses);
-    syncActivityTotal(updatedExpenses);
     setIsModalOpen(false);
   };
 
@@ -535,21 +539,8 @@ function ExpensesView({ activity, expenses, setExpenses, allExpenses, users }) {
       if(confirmDeleteId) {
         const updatedExpenses = allExpenses.filter(e => e.id !== confirmDeleteId);
         setExpenses(updatedExpenses);
-        syncActivityTotal(updatedExpenses);
         setConfirmDeleteId(null);
       }
-  };
-
-  const syncActivityTotal = (currentExpenses) => {
-    const storedActivities = JSON.parse(localStorage.getItem('split-bill-activities') || '[]');
-    const newTotal = currentExpenses
-    .filter(e => e.activityId === activity.id)
-    .reduce((sum, e) => sum + e.amount, 0);
-    
-    const updatedActivityList = storedActivities.map(a => 
-    a.id === activity.id ? { ...a, totalExpense: newTotal } : a
-    );
-    localStorage.setItem('split-bill-activities', JSON.stringify(updatedActivityList));
   };
 
   const toggleBeneficiary = (id) => {
