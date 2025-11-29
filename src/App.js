@@ -18,7 +18,12 @@ import {
   ShieldAlert,
   Info,
   Pencil,
-  AlertTriangle
+  AlertTriangle,
+  HardDrive, // 新增：用於資料管理圖示
+  Download, // 新增：用於匯出圖示
+  Upload, // 新增：用於匯入圖示
+  Copy, // 新增：用於複製圖示
+  Settings // 新增：用於新導航入口
 } from 'lucide-react';
 
 // --- Mock Data & Storage Helper ---
@@ -66,7 +71,7 @@ function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
             onClick={onConfirm}
             className="flex-1 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition shadow-lg shadow-red-200"
           >
-            確認刪除
+            確認
           </button>
         </div>
       </div>
@@ -77,6 +82,7 @@ function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
 // --- Main App Component ---
 
 export default function SplitBillApp() {
+  // 將 DataManagement 設為新的 Tab 選項
   const [activeTab, setActiveTab] = useState('activities'); 
   const [currentActivityId, setCurrentActivityId] = useState(null);
 
@@ -97,6 +103,27 @@ export default function SplitBillApp() {
     setCurrentActivityId(null);
     setActiveTab('activities');
   };
+  
+  // 提供給 DataManagementView 的 Setter Functions
+  const resetAllData = () => {
+    setUsers([]);
+    setActivities([]);
+    setExpenses([]);
+  };
+
+  const importAllData = (data) => {
+    setUsers(data.users || []);
+    setActivities(data.activities || []);
+    setExpenses(data.expenses || []);
+  };
+
+  // 匯出 App 所有資料
+  const exportData = {
+    users,
+    activities,
+    expenses,
+    version: '1.0.0'
+  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 font-sans text-gray-900">
@@ -112,6 +139,7 @@ export default function SplitBillApp() {
 
              <h1 className="text-xl font-bold flex items-center gap-2 truncate">
                {activeTab === 'personnel' && <><Users size={24} /> 人員管理</>}
+               {activeTab === 'data' && <><Settings size={24} /> 資料管理</>}
                {activeTab === 'activities' && !currentActivityId && <><Calendar size={24} /> 活動列表</>}
                {(activeTab === 'expenses' || activeTab === 'settlement') && currentActivity && (
                  <div className="flex flex-col overflow-hidden">
@@ -162,6 +190,17 @@ export default function SplitBillApp() {
               }}
             />
           )}
+          
+          {activeTab === 'data' && (
+            <DataManagementView 
+              data={exportData} 
+              resetAllData={resetAllData} 
+              importAllData={importAllData} 
+              users={users} 
+              activities={activities} 
+              expenses={expenses}
+            />
+          )}
 
           {activeTab === 'expenses' && currentActivity && (
             <ExpensesView 
@@ -185,9 +224,9 @@ export default function SplitBillApp() {
         </div>
       </main>
 
-      {/* Persistent Bottom Navigation */}
+      {/* Persistent Bottom Navigation - 新增 Data Management Tab */}
       <nav className="bg-white border-t border-gray-200 fixed bottom-0 w-full z-10">
-        <div className="max-w-md mx-auto grid grid-cols-2 h-16">
+        <div className="max-w-md mx-auto grid grid-cols-3 h-16">
           <button 
             onClick={() => handleTabChange('personnel')}
             className={`flex flex-col items-center justify-center ${activeTab === 'personnel' ? 'text-blue-600' : 'text-gray-400'}`}
@@ -202,13 +241,231 @@ export default function SplitBillApp() {
             <Calendar size={24} />
             <span className="text-xs mt-1">活動</span>
           </button>
+          <button 
+            onClick={() => handleTabChange('data')}
+            className={`flex flex-col items-center justify-center ${activeTab === 'data' ? 'text-blue-600' : 'text-gray-400'}`}
+          >
+            <Settings size={24} />
+            <span className="text-xs mt-1">資料</span>
+          </button>
         </div>
       </nav>
     </div>
   );
 }
 
-// --- Sub-Component: Personnel View ---
+// --- Sub-Component: Data Management View (NEW) ---
+
+function DataManagementView({ data, resetAllData, importAllData, users, activities, expenses }) {
+  const [importText, setImportText] = useState('');
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+  
+  const [copied, setCopied] = useState(false);
+  
+  // Helper to escape CSV strings
+  const csvEscape = (value) => {
+    if (value === null || value === undefined) return '';
+    const str = String(value).replace(/"/g, '""'); // Escape double quotes
+    if (str.includes(',') || str.includes('\n') || str.includes('"')) {
+      return `"${str}"`; // Enclose if special chars exist
+    }
+    return str;
+  };
+
+  // 匯出所有資料到 JSON (用於 App 之間轉移)
+  const handleExportJson = () => {
+    const jsonString = JSON.stringify(data);
+    
+    // 複製到剪貼簿 (在手機上最方便)
+    navigator.clipboard.writeText(jsonString).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        alert('JSON 資料已複製到剪貼簿。請將其貼到新的 App 中匯入。');
+    }).catch(err => {
+        console.error('Copy failed: ', err);
+        // 如果複製失敗，提供下載連結
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `split_bill_data_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+  };
+
+  // 匯出所有費用到 CSV (用於 Google Sheet 或 Excel)
+  const handleExportCsv = () => {
+    const header = [
+      '活動名稱', 
+      '費用項目', 
+      '金額', 
+      '付款人', 
+      '分攤人數', 
+      '排除外賓', 
+      '排除壽星', 
+      '紀錄日期'
+    ].join(',');
+
+    const rows = expenses.map(e => {
+      const activity = activities.find(a => a.id === e.activityId);
+      const payer = users.find(u => u.id === e.payerId);
+
+      return [
+        csvEscape(activity?.title || '未知活動'),
+        csvEscape(e.title),
+        e.amount,
+        csvEscape(payer?.name || '未知人員'),
+        e.beneficiaryIds.length,
+        e.excludeOutsiders ? '是' : '否',
+        e.excludeBirthday ? '是' : '否',
+        new Date(e.date).toLocaleDateString()
+      ].join(',');
+    });
+
+    const csvContent = [header, ...rows].join('\n');
+    const blob = new Blob(['\ufeff', csvContent], { type: 'text/csv;charset=utf-8;' }); // Add BOM for Chinese encoding
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `split_bill_expenses_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  
+  // 匯入 JSON 資料
+  const handleImport = () => {
+    try {
+      const importedData = JSON.parse(importText);
+      if (importedData.users && importedData.activities && importedData.expenses) {
+        if (!confirm('確認覆蓋資料？\n\n匯入將會清除當前 App 中的所有資料，並替換為匯入的內容。')) return;
+        importAllData(importedData);
+        alert('資料匯入成功！App 已更新。');
+        setShowImportModal(false);
+        setImportText('');
+      } else {
+        throw new Error('資料結構不完整。');
+      }
+    } catch (error) {
+      alert(`資料匯入失敗：請檢查貼上的內容是否為完整的 JSON 格式。\n錯誤訊息: ${error.message}`);
+    }
+  };
+  
+  const handleReset = () => {
+      resetAllData();
+      setConfirmResetOpen(false);
+      alert('所有資料已成功清除！');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-blue-50 p-4 rounded-xl text-sm text-blue-800 flex items-start gap-3">
+        <Info size={20} className="mt-0.5 shrink-0" />
+        <div>
+          <p className="font-bold mb-1">總資料摘要:</p>
+          <p>活動數: **{activities.length}** | 人員數: **{users.length}** | 支出筆數: **{expenses.length}**</p>
+        </div>
+      </div>
+      
+      {/* 匯出區塊 */}
+      <h2 className="text-xl font-bold border-b pb-2">資料匯出 (備份)</h2>
+      <div className="space-y-3">
+        <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-col sm:flex-row justify-between items-center gap-3">
+            <div className="flex items-center gap-3"><HardDrive size={24} className="text-blue-500" /><div className='flex-1'>
+                <div className="font-medium">匯出 JSON 檔案/文字</div>
+                <div className="text-xs text-gray-500">用於**跨裝置轉移**所有 App 資料 (人員/活動/支出)。</div>
+            </div></div>
+            <button 
+                onClick={handleExportJson} 
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-blue-700 transition"
+            >
+                {copied ? <Check size={18} /> : <Copy size={18} />} 
+                {copied ? '已複製到剪貼簿' : '複製 JSON 資料'}
+            </button>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-col sm:flex-row justify-between items-center gap-3">
+            <div className="flex items-center gap-3"><Download size={24} className="text-green-600" /><div className='flex-1'>
+                <div className="font-medium">匯出 CSV 檔案 (.csv)</div>
+                <div className="text-xs text-gray-500">用於**電腦保存備份**或上傳至 Google Sheet/Excel。</div>
+            </div></div>
+            <button 
+                onClick={handleExportCsv} 
+                className="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-green-700 transition"
+            >
+                <Download size={18} /> 下載 CSV 備份
+            </button>
+        </div>
+      </div>
+      
+      {/* 匯入區塊 */}
+      <h2 className="text-xl font-bold border-b pb-2 pt-4">資料匯入 (還原/轉移)</h2>
+      <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-col sm:flex-row justify-between items-center gap-3">
+        <div className="flex items-center gap-3"><Upload size={24} className="text-orange-500" /><div className='flex-1'>
+            <div className="font-medium">匯入 JSON 資料</div>
+            <div className="text-xs text-gray-500">將匯出的 JSON 文字貼上，還原所有 App 資料。</div>
+        </div></div>
+        <button 
+            onClick={() => setShowImportModal(true)} 
+            className="w-full sm:w-auto px-4 py-2 bg-orange-500 text-white rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-orange-600 transition"
+        >
+            <Upload size={18} /> 貼上並匯入
+        </button>
+      </div>
+
+      {/* 清除資料區塊 */}
+      <h2 className="text-xl font-bold border-b pb-2 pt-4">資料清除</h2>
+      <div className="bg-white p-4 rounded-xl shadow-sm border flex flex-col sm:flex-row justify-between items-center gap-3">
+        <div className="flex items-center gap-3"><Trash2 size={24} className="text-red-500" /><div className='flex-1'>
+            <div className="font-medium">清除所有資料</div>
+            <div className="text-xs text-gray-500">永久清除所有人員、活動及支出紀錄。</div>
+        </div></div>
+        <button 
+            onClick={() => setConfirmResetOpen(true)} 
+            className="w-full sm:w-auto px-4 py-2 bg-red-600 text-white rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-red-700 transition"
+        >
+            <Trash2 size={18} /> 重置所有資料
+        </button>
+      </div>
+
+
+      {/* 匯入彈窗 */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">匯入 JSON 資料 (會覆蓋現有資料)</h2>
+            <textarea 
+              placeholder="請貼上完整的 JSON 匯出文字..." 
+              className="w-full h-40 p-3 border rounded-lg text-sm resize-none outline-none focus:ring-2 focus:ring-orange-500 mb-4" 
+              value={importText} 
+              onChange={e => setImportText(e.target.value)}
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setShowImportModal(false)} className="flex-1 py-3 bg-gray-100 rounded-xl font-medium text-gray-700">取消</button>
+              <button onClick={handleImport} className="flex-1 py-3 bg-orange-500 text-white rounded-xl font-medium" disabled={!importText.trim()}>確認匯入</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* 重置確認彈窗 */}
+      <ConfirmModal 
+        isOpen={confirmResetOpen}
+        title="警告：清除所有資料"
+        message="這將永久清除所有人員、活動和支出紀錄，且無法復原。請確認您已備份 JSON 資料。"
+        onConfirm={handleReset}
+        onCancel={() => setConfirmResetOpen(false)}
+      />
+    </div>
+  );
+}
+
+
+// --- Sub-Component: Personnel View (No changes) ---
 function PersonnelView({ users, setUsers }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -302,7 +559,7 @@ function PersonnelView({ users, setUsers }) {
   );
 }
 
-// --- Sub-Component: Activities View ---
+// --- Sub-Component: Activities View (Fixed in previous step) ---
 
 function ActivitiesView({ activities, setActivities, users, onSelectActivity, setExpenses, expenses }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -437,7 +694,7 @@ function ActivitiesView({ activities, setActivities, users, onSelectActivity, se
   );
 }
 
-// --- Sub-Component: Expenses View ---
+// --- Sub-Component: Expenses View (No changes) ---
 
 function ExpensesView({ activity, expenses, setExpenses, allExpenses, users }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -656,7 +913,7 @@ function ExpensesView({ activity, expenses, setExpenses, allExpenses, users }) {
   );
 }
 
-// --- Sub-Component: Settlement View ---
+// --- Sub-Component: Settlement View (No changes) ---
 
 function SettlementView({ activity, setActivities, expenses, users }) {
   const birthdayIds = useMemo(() => 
